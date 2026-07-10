@@ -10,20 +10,20 @@
 
 ```bash
 # Client SDK only
-pip install log-center-sdk                        # HTTP delivery (default)
-pip install log-center-sdk[grpc]                  # + gRPC delivery
-pip install log-center-sdk[celery]                # + Celery delivery
-pip install log-center-sdk[fastapi]               # + FastAPI middleware
-pip install log-center-sdk[flask]                 # + Flask hooks
+pip install ikc-log-center                        # HTTP delivery (default)
+pip install ikc-log-center[grpc]                  # + gRPC delivery
+pip install ikc-log-center[celery]                # + Celery delivery
+pip install ikc-log-center[fastapi]               # + FastAPI middleware
+pip install ikc-log-center[flask]                 # + Flask hooks
 
 # Server
-pip install log-center-sdk[server]                # HTTP server + SQLite
-pip install log-center-sdk[server,ui]             # + Gradio search UI
-pip install log-center-sdk[server,mysql]          # + MySQL backend
-pip install log-center-sdk[server,pg]             # + PostgreSQL backend
+pip install ikc-log-center[server]                # HTTP server + SQLite
+pip install ikc-log-center[server,ui]             # + Gradio search UI
+pip install ikc-log-center[server,mysql]          # + MySQL backend
+pip install ikc-log-center[server,pg]             # + PostgreSQL backend
 
 # Everything
-pip install log-center-sdk[all]
+pip install ikc-log-center[all]
 ```
 
 ---

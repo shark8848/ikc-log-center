@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# publish-pypi.sh — Build and upload log-center-sdk to PyPI.
+# publish-pypi.sh — Build and upload ikc-log-center to PyPI.
 #
 # Usage:
 #   ./scripts/publish-pypi.sh                          # Full build + upload
@@ -149,4 +149,4 @@ TWINE_ARGS+=(dist/*)
 python -m twine "${TWINE_ARGS[@]}"
 
 echo ""
-echo "✅ Published log-center-sdk $PACKAGE_VERSION to $REPOSITORY_URL"
+echo "✅ Published ikc-log-center $PACKAGE_VERSION to $REPOSITORY_URL"
