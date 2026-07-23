@@ -333,40 +333,6 @@ LOG_CENTER_MYSQL_DB=log_center \
 
 ---
 
-## Project Structure
-
-```
-ikc-log-center/
-├── src/
-│   ├── log_center_sdk/           # Client SDK
-│   │   ├── __init__.py           # Public API exports
-│   │   ├── core.py               # Trace context, JSON formatter, configure()
-│   │   ├── handlers.py           # HTTP/gRPC/Celery batch handlers
-│   │   ├── instrumentation.py    # @instrumented decorator
-│   │   ├── celery_hooks.py       # Fork-safety hooks
-│   │   └── integrations/
-│   │       ├── fastapi.py        # Trace middleware
-│   │       └── flask.py          # Trace hooks
-│   └── log_center_server/        # Server
-│       ├── __init__.py
-│       ├── __main__.py           # CLI entry point + token management
-│       ├── app.py                # FastAPI endpoints + auth middleware
-│       ├── auth.py               # Token generation / verification / storage
-│       ├── storage.py            # Storage backends
-│       ├── grpc_server.py        # gRPC service
-│       ├── celery_task.py        # Celery task
-│       ├── query.py              # SQLAlchemy ORM + multi-backend query
-│       └── mcp_server.py         # MCP (Model Context Protocol) server
-├── tests/                        # Test suite
-├── web/                          # React + Vite + Ant Design frontend
-├── docs/
-│   └── design.md                 # Architecture design document
-├── start_log_center.sh           # Server start script
-├── stop_log_center.sh            # Server stop script
-├── show_log_center.sh            # Server status script
-└── pyproject.toml                # Build configuration
-```
-
 ## License
 
 本项目基于 **[MIT License](https://opensource.org/licenses/MIT)** 开源。
