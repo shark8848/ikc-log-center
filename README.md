@@ -217,6 +217,56 @@ curl http://localhost:9315/ingest -X POST -d '{"level":"INFO"}'
 
 > Local file logging is **always active** regardless of backend choice.
 
+#### PostgreSQL 初始化
+
+首次使用 PostgreSQL 后端时，需要创建数据库和用户（表会自动创建）：
+
+```bash
+# 创建数据库
+sudo -u postgres psql -c "CREATE DATABASE log_center;"
+
+# 创建用户
+sudo -u postgres psql -c "CREATE USER log_center WITH PASSWORD 'your_password';"
+
+# 授权
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE log_center TO log_center;"
+sudo -u postgres psql -d log_center -c "GRANT ALL ON SCHEMA public TO log_center;"
+```
+
+启动服务（表 `logs` 和 `api_tokens` 会自动创建）：
+
+```bash
+LOG_CENTER_STORE=pg \
+LOG_CENTER_PG_HOST=localhost \
+LOG_CENTER_PG_PORT=5432 \
+LOG_CENTER_PG_USER=log_center \
+LOG_CENTER_PG_PASSWORD=your_password \
+LOG_CENTER_PG_DB=log_center \
+./start_log_center.sh --ui
+```
+
+#### MySQL 初始化
+
+```sql
+-- 创建数据库和用户
+CREATE DATABASE log_center CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'log_center'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON log_center.* TO 'log_center'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+启动服务：
+
+```bash
+LOG_CENTER_STORE=mysql \
+LOG_CENTER_MYSQL_HOST=localhost \
+LOG_CENTER_MYSQL_PORT=3306 \
+LOG_CENTER_MYSQL_USER=log_center \
+LOG_CENTER_MYSQL_PASSWORD=your_password \
+LOG_CENTER_MYSQL_DB=log_center \
+./start_log_center.sh --ui
+```
+
 ### Server Environment Variables
 
 #### Core
