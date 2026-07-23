@@ -333,42 +333,6 @@ LOG_CENTER_MYSQL_DB=log_center \
 
 ---
 
-## Publishing (发布到 PyPI)
-
-### 前置准备
-
-1. 复制凭证模板并填入 PyPI token：
-```bash
-cp config/pypi.env.example config/pypi.env
-# 编辑 config/pypi.env，填入你的 PyPI API token
-```
-
-2. 确保 `.gitignore` 已排除 `config/pypi.env`（已配置）。
-
-### 发布流程
-
-```bash
-# 完整发布：build + upload
-./scripts/publish-pypi.sh
-
-# 指定版本号
-LOG_CENTER_VERSION=0.2.0 ./scripts/publish-pypi.sh
-
-# 发布到 TestPyPI (测试)
-./scripts/publish-pypi.sh --test
-
-# 跳过构建 (复用已有 dist/)
-./scripts/publish-pypi.sh --skip-build
-```
-
-### 版本管理
-
-版本号通过以下方式控制（优先级从高到低）：
-1. 环境变量 `LOG_CENTER_VERSION`
-2. `pyproject.toml` 中的 `version` 字段
-
----
-
 ## Project Structure
 
 ```
@@ -392,13 +356,9 @@ ikc-log-center/
 │       ├── grpc_server.py        # gRPC service
 │       ├── celery_task.py        # Celery task
 │       ├── query.py              # SQLAlchemy ORM + multi-backend query
-│       └── ui.py                 # Gradio search UI
+│       └── mcp_server.py         # MCP (Model Context Protocol) server
 ├── tests/                        # Test suite
-├── scripts/
-│   └── publish-pypi.sh           # PyPI publish script
-├── config/
-│   ├── pypi.env                  # PyPI credentials (gitignored)
-│   └── pypi.env.example          # Template
+├── web/                          # React + Vite + Ant Design frontend
 ├── docs/
 │   └── design.md                 # Architecture design document
 ├── start_log_center.sh           # Server start script
@@ -409,4 +369,10 @@ ikc-log-center/
 
 ## License
 
-MIT
+本项目基于 **[MIT License](https://opensource.org/licenses/MIT)** 开源。
+
+- **版权所有**：Copyright (c) IKC Team
+- **授权范围**：任何人均可免费获取、使用、复制、修改、合并、发布、分发、再授权及商业使用本软件，唯一条件是保留版权声明与许可声明。
+- **免责声明**：本软件按“原样”提供，不提供任何明示或暗示的担保（包括但不限于适销性、特定用途适用性及非侵权性）。在任何情况下，作者均不对因使用本软件而产生的任何索赔、损害或其他责任负责。
+
+完整条款详见 [MIT License 全文](https://opensource.org/licenses/MIT)。
