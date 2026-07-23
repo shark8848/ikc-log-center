@@ -7,8 +7,9 @@
 #   ./start_log_center.sh [OPTIONS]
 #
 # Options:
-#   --ui                   Enable Gradio search UI (port 9317)
+#   --ui                   Enable Web UI (served by FastAPI from web/dist/)
 #   --grpc                 Enable gRPC ingestion server (port 9316)
+#   --mcp                  Enable MCP service for AI clients (port 9318)
 #   --reload               Enable auto-reload (development mode)
 #   --gen-token [DESC]     Generate a new API token (then exit)
 #   --list-tokens          List all API tokens (then exit)
@@ -20,14 +21,18 @@
 #   # 1. 基础启动（仅 HTTP API，SQLite 存储）
 #   ./start_log_center.sh
 #
-#   # 2. 启动 HTTP API + Gradio 搜索 UI
+#   # 2. 启动 HTTP API + Web UI（需先构建前端: cd web && npm run build）
 #   ./start_log_center.sh --ui
 #
-#   # 3. 全功能启动（HTTP + gRPC + UI）
-#   ./start_log_center.sh --ui --grpc
+#   # 3. 全功能启动（HTTP + gRPC + UI + MCP）
+#   ./start_log_center.sh --ui --grpc --mcp
 #
 #   # 4. 开发模式（自动重载 + UI）
 #   ./start_log_center.sh --ui --reload
+#
+#   # 5. 启用 MCP + Token 鉴权（AI 客户端需携带 Bearer Token）
+#   LOG_CENTER_AUTH_ENABLED=true \
+#   ./start_log_center.sh --ui --mcp
 #
 #   # 5. 自定义端口
 #   LOG_CENTER_PORT=8080 ./start_log_center.sh --ui
@@ -90,8 +95,11 @@
 #   LOG_CENTER_FORWARD_URLS    Comma-separated forward URLs
 #   LOG_CENTER_UI_ENABLE       Set true/1 to enable UI (alt to --ui flag)
 #   LOG_CENTER_GRPC_ENABLE     Set true/1 to enable gRPC (alt to --grpc flag)
-#   LOG_CENTER_UI_PORT         Gradio UI port (default: 9317)
 #   LOG_CENTER_GRPC_PORT       gRPC port (default: 9316)
+#   LOG_CENTER_MCP_ENABLE      Set true/1 to enable MCP (alt to --mcp flag)
+#   LOG_CENTER_MCP_PORT        MCP service port (default: 9318)
+#   LOG_CENTER_MCP_HOST        MCP bind host (default: 127.0.0.1)
+#   LOG_CENTER_MCP_TOKEN       Bearer token for MCP stdio mode (when auth enabled)
 #   LOG_CENTER_PG_*            PostgreSQL connection params
 #   LOG_CENTER_MYSQL_*         MySQL connection params
 #   LOG_CENTER_ES_ENDPOINT     Elasticsearch endpoint URL
@@ -152,6 +160,7 @@ ARGS=""
 for arg in "$@"; do
     case "$arg" in
         --ui|--grpc|--reload) ARGS="$ARGS $arg" ;;
+        --mcp) ;; # handled separately below
         --gen-token|--list-tokens) 
             # Token management: run directly and exit
             "$PYTHON" -m log_center_server "$@"
@@ -172,7 +181,19 @@ if [ "${LOG_CENTER_UI_ENABLE}" = "true" ] || [ "${LOG_CENTER_UI_ENABLE}" = "1" ]
     ARGS="$ARGS --ui"
 fi
 
+# Check if MCP is requested (via --mcp flag or env var)
+MCP_ENABLED=false
+for arg in "$@"; do
+    [ "$arg" = "--mcp" ] && MCP_ENABLED=true
+done
+if [ "${LOG_CENTER_MCP_ENABLE}" = "true" ] || [ "${LOG_CENTER_MCP_ENABLE}" = "1" ]; then
+    MCP_ENABLED=true
+fi
+
 PORT="${LOG_CENTER_PORT:-9315}"
+MCP_PORT="${LOG_CENTER_MCP_PORT:-9318}"
+MCP_HOST="${LOG_CENTER_MCP_HOST:-127.0.0.1}"
+MCP_PIDFILE="$SCRIPT_DIR/.run/log_center_mcp.pid"
 
 # ---------------------------------------------------------------------------
 # Launch
@@ -180,6 +201,15 @@ PORT="${LOG_CENTER_PORT:-9315}"
 nohup "$PYTHON" -m log_center_server --port "$PORT" $ARGS \
     >> "$LOGFILE" 2>&1 &
 echo $! > "$PIDFILE"
+
+# Launch MCP service if requested
+if [ "$MCP_ENABLED" = "true" ]; then
+    MCP_LOGFILE="$SCRIPT_DIR/logs/log_center_mcp.log"
+    nohup "$PYTHON" -m log_center_server.mcp_server \
+        --transport http --host "$MCP_HOST" --port "$MCP_PORT" \
+        >> "$MCP_LOGFILE" 2>&1 &
+    echo $! > "$MCP_PIDFILE"
+fi
 
 sleep 0.5
 if ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -192,4 +222,11 @@ fi
 echo "Log center started (PID $(cat "$PIDFILE"))"
 echo "  HTTP:  http://localhost:${PORT}"
 echo "  gRPC:  localhost:${LOG_CENTER_GRPC_PORT:-9316}"
-echo "  UI:    http://localhost:${LOG_CENTER_UI_PORT:-9317}"
+echo "  Web UI: http://localhost:${PORT} (if web/dist/ exists)"
+echo "  Dev UI: cd web && npm run dev → http://localhost:5173"
+if [ "$MCP_ENABLED" = "true" ]; then
+    echo "  MCP:   http://${MCP_HOST}:${MCP_PORT}/mcp (streamable-http)"
+    if [ "${LOG_CENTER_AUTH_ENABLED}" = "true" ] || [ "${LOG_CENTER_AUTH_ENABLED}" = "1" ]; then
+        echo "         Auth: Bearer token required (LOG_CENTER_MCP_TOKEN for stdio)"
+    fi
+fi

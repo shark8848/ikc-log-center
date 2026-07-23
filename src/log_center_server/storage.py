@@ -127,11 +127,17 @@ def init_sqlite() -> None:
             trace_id TEXT,
             span_id TEXT,
             parent_id TEXT,
+            source_ip TEXT,
             payload TEXT
         );
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_trace ON logs(trace_id)")
+    # Migrate: add source_ip column if missing (existing databases)
+    try:
+        conn.execute("ALTER TABLE logs ADD COLUMN source_ip TEXT")
+    except Exception:
+        pass  # column already exists
     conn.commit()
     conn.close()
     _sqlite_initialized = True
@@ -151,12 +157,13 @@ def write_sqlite(entries: list[dict[str, Any]]) -> None:
             e.get("trace_id"),
             e.get("span_id"),
             e.get("parent_id"),
+            e.get("source_ip"),
             json.dumps(e, ensure_ascii=False),
         )
         for e in entries
     ]
     conn.executemany(
-        "INSERT INTO logs (ts, level, logger, message, trace_id, span_id, parent_id, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO logs (ts, level, logger, message, trace_id, span_id, parent_id, source_ip, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rows,
     )
     conn.commit()

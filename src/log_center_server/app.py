@@ -1,9 +1,13 @@
-"""FastAPI application for log ingestion, health, and search.
+"""FastAPI application for log ingestion, health, search, and management.
 
-Provides three endpoints:
+Provides endpoints:
 - POST /ingest — accept single or array of JSON log objects
 - GET /health — liveness probe
 - GET /search — query logs by trace_id, level, message_substr
+- GET /api/tokens — list API tokens
+- POST /api/tokens — generate a new API token
+- DELETE /api/tokens/{prefix} — revoke a token
+- GET /api/stats — dashboard statistics
 
 All ingestion paths (HTTP, gRPC, Celery) share ``process_entries()``.
 """
@@ -12,11 +16,13 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse, JSONResponse
 
 from .storage import (
     forward_entries,
@@ -27,7 +33,7 @@ from .storage import (
     FORWARD_URLS,
 )
 from .query import query_logs
-from .auth import AUTH_ENABLED, init_token_store, verify_token
+from .auth import AUTH_ENABLED, init_token_store, verify_token, generate_token, add_token, list_tokens, revoke_token
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -132,6 +138,13 @@ async def ingest(request: Request) -> dict[str, Any]:
     if not entries:
         return {"status": "ok", "stored": 0}
 
+    # Inject source IP from client request
+    client_ip = request.client.host if request.client else None
+    if client_ip:
+        for e in entries:
+            if not e.get("source_ip"):
+                e["source_ip"] = client_ip
+
     trace_id_hint = request.headers.get("x-trace-id")
     return process_entries(entries, trace_id_hint=trace_id_hint)
 
@@ -161,3 +174,90 @@ async def search(
         limit=limit,
     )
     return {"status": "ok", "count": len(rows), "items": rows}
+
+
+@app.get("/api/trace/{trace_id}", tags=["log-center"])
+async def api_trace_chain(trace_id: str) -> dict[str, Any]:
+    """Return all logs for a given trace_id in chronological order (trace chain)."""
+    rows = query_logs(trace_id=trace_id.strip(), limit=500)
+    # Sort by timestamp ascending for chain visualization
+    rows.sort(key=lambda r: r.get("ts") or "")
+    return {"status": "ok", "trace_id": trace_id, "count": len(rows), "items": rows}
+
+
+# ---------------------------------------------------------------------------
+# Token management API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/tokens", tags=["management"])
+async def api_list_tokens() -> dict[str, Any]:
+    """List all API tokens (metadata only)."""
+    tokens = list_tokens()
+    return {"status": "ok", "tokens": tokens}
+
+
+@app.post("/api/tokens", tags=["management"])
+async def api_create_token(request: Request) -> dict[str, Any]:
+    """Generate a new API token. Returns plaintext only once."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    description = body.get("description", "") if isinstance(body, dict) else ""
+    plain, info = generate_token(description=description)
+    add_token(info)
+    return {"status": "ok", "token": plain, "prefix": info["prefix"], "description": description}
+
+
+@app.delete("/api/tokens/{prefix}", tags=["management"])
+async def api_revoke_token(prefix: str) -> dict[str, Any]:
+    """Revoke a token by its prefix."""
+    ok = revoke_token(prefix)
+    if ok:
+        return {"status": "ok", "revoked": prefix}
+    return JSONResponse(status_code=404, content={"status": "error", "reason": "token not found"})
+
+
+# ---------------------------------------------------------------------------
+# Stats API (dashboard)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/stats", tags=["management"])
+async def api_stats(granularity: str = "hour") -> dict[str, Any]:
+    """Return log statistics for the dashboard.
+
+    granularity: minute | hour | day | month
+    """
+    from .query import get_stats
+    if granularity not in ("minute", "hour", "day", "month"):
+        granularity = "hour"
+    stats = get_stats(granularity=granularity)
+    return {"status": "ok", **stats}
+
+
+@app.get("/api/nodes", tags=["management"])
+async def api_nodes() -> dict[str, Any]:
+    """Return connected service nodes for topology view."""
+    from .query import get_nodes
+    nodes = get_nodes()
+    return {"status": "ok", "nodes": nodes}
+
+
+# ---------------------------------------------------------------------------
+# Static file serving (production SPA)
+# ---------------------------------------------------------------------------
+
+_WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
+
+if _WEB_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=_WEB_DIST / "assets"), name="static-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        """Serve index.html for all non-API routes (SPA fallback)."""
+        file_path = _WEB_DIST / full_path
+        if full_path and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(_WEB_DIST / "index.html")

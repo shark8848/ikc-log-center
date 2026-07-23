@@ -1,7 +1,10 @@
 """CLI entry point: ``python -m log_center_server``.
 
 Starts the HTTP API server (uvicorn) on the main thread.
-Optionally starts gRPC and Gradio UI as daemon threads.
+Optionally starts gRPC as a daemon thread.
+
+The web UI (Vite + React) is served as static files from web/dist/
+when available, or run separately via ``cd web && npm run dev``.
 
 Token management commands (exit after execution):
   --gen-token DESC       Generate a new API token
@@ -32,11 +35,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--ui", action="store_true",
-        help="Also start Gradio search UI on LOG_CENTER_UI_PORT (default: 9317)",
+        help="Print web UI URL (UI is served from web/dist/ by FastAPI)",
     )
     parser.add_argument(
         "--ui-port", type=int, default=int(os.getenv("LOG_CENTER_UI_PORT", "9317")),
-        help="Gradio UI port (default: 9317)",
+        help="(Deprecated) UI port — no longer used with Vite frontend",
     )
     parser.add_argument(
         "--reload", action="store_true",
@@ -69,16 +72,10 @@ def main() -> None:
         grpc_thread = threading.Thread(target=serve_grpc, daemon=True)
         grpc_thread.start()
 
-    # Optionally start Gradio UI in a daemon thread
+    # Print UI info
     if args.ui:
-        from .ui import build_ui
-
-        def _run_ui():
-            demo = build_ui()
-            demo.launch(server_name=args.host, server_port=args.ui_port)
-
-        ui_thread = threading.Thread(target=_run_ui, daemon=True)
-        ui_thread.start()
+        print(f"  Web UI:  http://localhost:{args.port}  (served by FastAPI from web/dist/)")
+        print(f"  Dev UI:  cd web && npm run dev  (http://localhost:5173 with HMR)")
 
     # Start FastAPI via uvicorn (main thread)
     import uvicorn

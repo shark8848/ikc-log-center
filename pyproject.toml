@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ikc-log-center"
-version = "0.1.0"
+version = "0.3.0"
 description = "Lightweight SDK + Server for log_center — decorator-based instrumentation with HTTP/gRPC/Celery delivery, multi-backend storage, and search UI."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,7 +37,8 @@ server = [
     "uvicorn[standard]>=0.20",
     "sqlalchemy>=2.0",
 ]
-ui = ["gradio>=3.40"]
+ui = []  # UI is now Vite+React (see web/ directory), no Python deps needed
+mcp = ["mcp>=1.28"]
 mysql = ["mysql-connector-python>=8.0"]
 pg = ["psycopg[binary]>=3.0"]
 all = [
@@ -48,9 +49,9 @@ all = [
     "flask>=2.0",
     "uvicorn[standard]>=0.20",
     "sqlalchemy>=2.0",
-    "gradio>=6.20.0",
     "mysql-connector-python>=8.0",
     "psycopg[binary]>=3.0",
+    "mcp>=1.28",
 ]
 dev = [
     "pytest>=7.0",
@@ -61,6 +62,7 @@ dev = [
 
 [project.scripts]
 log-center-server = "log_center_server.__main__:main"
+log-center-mcp = "log_center_server.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/log_center_sdk", "src/log_center_server"]

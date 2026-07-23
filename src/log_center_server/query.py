@@ -62,6 +62,7 @@ class LogEntry(Base):
     trace_id = Column(String(128))
     span_id = Column(String(128))
     parent_id = Column(String(128))
+    source_ip = Column(String(64))
     payload = Column(Text)
 
 
@@ -224,3 +225,204 @@ def query_logs(
         return _query_es(trace_id, level, message_substr, limit)
 
     return _query_sql(trace_id, level, message_substr, limit)
+
+
+# ---------------------------------------------------------------------------
+# Stats (dashboard)
+# ---------------------------------------------------------------------------
+
+
+# Granularity config: (ts_substr_length, es_interval, max_buckets)
+_GRANULARITY = {
+    "minute": (16, "1m", 60),
+    "hour": (13, "1h", 24),
+    "day": (10, "1d", 31),
+    "month": (7, "1M", 12),
+}
+
+
+def _stats_sql(granularity: str = "hour") -> dict[str, Any]:
+    """Compute stats from SQL backends."""
+    ts_len, _, max_buckets = _GRANULARITY.get(granularity, _GRANULARITY["hour"])
+    engine = create_engine(DB_URL, echo=False, future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        total = session.execute(select(func.count(LogEntry.id))).scalar() or 0
+        level_rows = session.execute(
+            select(LogEntry.level, func.count(LogEntry.id)).group_by(LogEntry.level)
+        ).all()
+        # Trend grouped by granularity (based on ts string prefix)
+        recent_rows = session.execute(
+            select(func.substr(LogEntry.ts, 1, ts_len), func.count(LogEntry.id))
+            .where(LogEntry.ts.isnot(None))
+            .group_by(func.substr(LogEntry.ts, 1, ts_len))
+            .order_by(func.substr(LogEntry.ts, 1, ts_len).desc())
+            .limit(max_buckets)
+        ).all()
+
+    levels = {row[0] or "UNKNOWN": row[1] for row in level_rows}
+    trend = [{"time": row[0], "count": row[1]} for row in reversed(recent_rows)]
+    return {"total": total, "levels": levels, "trend": trend}
+
+
+def _stats_es(granularity: str = "hour") -> dict[str, Any]:
+    """Compute stats from Elasticsearch."""
+    import requests
+
+    _, es_interval, max_buckets = _GRANULARITY.get(granularity, _GRANULARITY["hour"])
+
+    try:
+        # Total count
+        count_resp = requests.get(
+            f"{ES_ENDPOINT.rstrip('/')}/{ES_INDEX}/_count",
+            auth=ES_AUTH, verify=ES_VERIFY_SSL, timeout=5,
+        )
+        total = count_resp.json().get("count", 0)
+
+        # Level aggregation + trend
+        agg_body = {
+            "size": 0,
+            "aggs": {
+                "by_level": {"terms": {"field": "level.keyword", "size": 10}},
+                "trend": {
+                    "date_histogram": {
+                        "field": "@timestamp",
+                        "fixed_interval": es_interval,
+                        "order": {"_key": "desc"},
+                    }
+                },
+            },
+        }
+        agg_resp = requests.post(
+            f"{ES_ENDPOINT.rstrip('/')}/{ES_INDEX}/_search",
+            json=agg_body,
+            headers={"Content-Type": "application/json"},
+            auth=ES_AUTH, verify=ES_VERIFY_SSL, timeout=5,
+        )
+        data = agg_resp.json()
+        aggs = data.get("aggregations", {})
+        levels = {b["key"]: b["doc_count"] for b in aggs.get("by_level", {}).get("buckets", [])}
+        trend = [
+            {"time": b["key_as_string"], "count": b["doc_count"]}
+            for b in reversed(aggs.get("trend", {}).get("buckets", [])[-max_buckets:])
+        ]
+        return {"total": total, "levels": levels, "trend": trend}
+    except Exception:
+        return {"total": 0, "levels": {}, "trend": []}
+
+
+def get_stats(granularity: str = "hour") -> dict[str, Any]:
+    """Return dashboard statistics, dispatching by backend.
+
+    granularity: 'minute' | 'hour' | 'day' | 'month'
+    """
+    if STORE_BACKEND == "es" and ES_ENDPOINT:
+        return _stats_es(granularity)
+    return _stats_sql(granularity)
+
+
+# ---------------------------------------------------------------------------
+# Topology nodes (connected services)
+# ---------------------------------------------------------------------------
+
+
+def _nodes_sql() -> list[dict[str, Any]]:
+    """Get distinct logger nodes with stats from SQL backends, grouped by IP."""
+    engine = create_engine(DB_URL, echo=False, future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine, future=True) as session:
+        rows = session.execute(
+            select(
+                LogEntry.source_ip,
+                LogEntry.logger,
+                func.count(LogEntry.id).label("log_count"),
+                func.sum(
+                    func.cast(LogEntry.level.in_(["ERROR", "CRITICAL"]), Integer)
+                ).label("error_count"),
+                func.max(LogEntry.ts).label("last_active"),
+            )
+            .where(LogEntry.logger.isnot(None))
+            .group_by(LogEntry.source_ip, LogEntry.logger)
+            .order_by(LogEntry.source_ip, func.count(LogEntry.id).desc())
+        ).all()
+
+    # Build hierarchical structure: [{ip, apps: [{name, log_count, ...}]}]
+    ip_map: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        ip = row[0] or "unknown"
+        app_info = {
+            "name": row[1] or "unknown",
+            "log_count": row[2],
+            "error_count": row[3] or 0,
+            "last_active": row[4],
+        }
+        ip_map.setdefault(ip, []).append(app_info)
+
+    return [
+        {"ip": ip, "apps": apps, "log_count": sum(a["log_count"] for a in apps), "error_count": sum(a["error_count"] for a in apps)}
+        for ip, apps in sorted(ip_map.items(), key=lambda x: sum(a["log_count"] for a in x[1]), reverse=True)
+    ]
+
+
+def _nodes_es() -> list[dict[str, Any]]:
+    """Get distinct logger nodes from Elasticsearch, grouped by IP."""
+    import requests
+
+    try:
+        body = {
+            "size": 0,
+            "aggs": {
+                "by_ip": {
+                    "terms": {"field": "source_ip.keyword", "size": 100, "missing": "unknown"},
+                    "aggs": {
+                        "by_logger": {
+                            "terms": {"field": "logger.keyword", "size": 50},
+                            "aggs": {
+                                "errors": {
+                                    "filter": {"terms": {"level.keyword": ["ERROR", "CRITICAL"]}}
+                                },
+                                "last_active": {"max": {"field": "@timestamp"}},
+                            },
+                        }
+                    },
+                }
+            },
+        }
+        resp = requests.post(
+            f"{ES_ENDPOINT.rstrip('/')}/{ES_INDEX}/_search",
+            json=body,
+            headers={"Content-Type": "application/json"},
+            auth=ES_AUTH,
+            verify=ES_VERIFY_SSL,
+            timeout=5,
+        )
+        ip_buckets = resp.json().get("aggregations", {}).get("by_ip", {}).get("buckets", [])
+        result = []
+        for ip_b in ip_buckets:
+            apps = [
+                {
+                    "name": lb["key"],
+                    "log_count": lb["doc_count"],
+                    "error_count": lb["errors"]["doc_count"],
+                    "last_active": lb["last_active"]["value_as_string"],
+                }
+                for lb in ip_b["by_logger"]["buckets"]
+            ]
+            result.append({
+                "ip": ip_b["key"],
+                "apps": apps,
+                "log_count": ip_b["doc_count"],
+                "error_count": sum(a["error_count"] for a in apps),
+            })
+        return result
+    except Exception:
+        return []
+
+
+def get_nodes() -> list[dict[str, Any]]:
+    """Return connected service nodes for topology view."""
+    if STORE_BACKEND == "es" and ES_ENDPOINT:
+        return _nodes_es()
+    return _nodes_sql()
