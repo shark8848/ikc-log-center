@@ -10,6 +10,7 @@ venv/
 .env
 config/pypi.env
 !config/pypi.env.example
+scripts/publish-pypi.sh
 .pytest_cache/
 .ruff_cache/
 logs/
