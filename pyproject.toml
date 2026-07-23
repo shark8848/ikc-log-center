@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ikc-log-center"
-version = "0.3.0"
+version = "0.3.1"
 description = "Lightweight SDK + Server for log_center — decorator-based instrumentation with HTTP/gRPC/Celery delivery, multi-backend storage, and search UI."
 readme = "README.md"
 requires-python = ">=3.10"
